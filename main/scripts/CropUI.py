@@ -1093,7 +1093,11 @@ class CropInterface:
         self.fixed_sel_entry_var = tk.StringVar(value="1:1")
         self.fixed_sel_mode_var = tk.StringVar(value="Aspect Ratio")
         self.auto_aspect_var = tk.BooleanVar(value=False)
-        self.auto_entry_var = tk.StringVar(value="1:1, 5:4, 4:5, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16, 2:1, 1:2")
+
+        # Aspect ratio presets
+        self.standard_ratios = "1:1, 5:4, 4:5, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16, 2:1, 1:2"
+        self.onetrainer_ratios = "1:1, 4:5, 5:4, 2:3, 3:2, 4:7, 7:4, 1:2, 2:1, 2:5, 5:2, 1:3, 3:1, 2:7, 7:2, 1:4, 4:1"
+        self.auto_entry_var = tk.StringVar(value=self.standard_ratios)
 
 
 # --------------------------------------
@@ -1311,6 +1315,20 @@ class CropInterface:
         self.fixed_selection_option_combobox.bind("<MouseWheel>", self.toggle_widgets_by_mode)
         ToolTip(self.fixed_selection_option_combobox, "Choose what to be fixed", 200, 6, 12)
         # Auto Mode
+        preset_frame = tk.Frame(fixed_selection_frame)
+        preset_frame.grid(row=2, column=0, columnspan=99, sticky="ew", padx=self.pady, pady=(0, self.pady))
+
+        preset_label = ttk.Label(preset_frame, text="Presets:")
+        preset_label.pack(side="left")
+
+        standard_button = ttk.Button(preset_frame, text="Standard",
+                                   command=lambda: self.auto_entry_var.set(self.standard_ratios))
+        standard_button.pack(side="left", padx=2)
+
+        onetrainer_button = ttk.Button(preset_frame, text="Onetrainer",
+                                     command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
+        onetrainer_button.pack(side="left", padx=2)
+
         self.auto_aspect_checkbutton = ttk.Checkbutton(fixed_selection_frame, text="Auto", variable=self.auto_aspect_var, command=self.update_auto_entry_state, state="disabled")
         self.auto_aspect_checkbutton.grid(row=1, column=0, padx=self.padxl, pady=self.pady, sticky="w")
         ToolTip(self.auto_aspect_checkbutton, "Automatically select the best aspect ratio for the selection based on the predefined ratios and the aspect ratio of the displayed image.\n\n'Fixed' and 'Aspect Ratio' must be enabled!", 200, 6, 12, wraplength=240)
