@@ -839,7 +839,44 @@ class CropSelHandles:
                 dy = dx / target_ratio
             x1_new, y1_new, x2_new, y2_new = self._calculate_new_coords(x1, y1, x2, y2, cx, cy, dx, dy, x_off, y_off, x_max, y_max)
         else:
-            if 'n' in handle or 's' in handle:
+            # Handle corner dragging specifically
+            if len(handle) == 2:  # Corner handles (ne, nw, se, sw)
+                # Determine the anchor corner (opposite of the dragged corner)
+                anchor_x = x1 if 'e' in handle else x2
+                anchor_y = y1 if 's' in handle else y2
+
+                # Calculate distance from cursor to anchor
+                dx = abs(event.x - anchor_x)
+                dy = abs(event.y - anchor_y)
+
+                # Choose dimension to prioritize (whichever gives larger area)
+                area_by_width = dx * (dx / target_ratio)
+                area_by_height = (dy * target_ratio) * dy
+
+                if area_by_width >= area_by_height:
+                    # Width-based calculation
+                    new_width = dx
+                    new_height = new_width / target_ratio
+                else:
+                    # Height-based calculation
+                    new_height = dy
+                    new_width = new_height * target_ratio
+
+                # Set new coordinates based on anchor point
+                if anchor_x == x1:  # Right side dragging
+                    x1_new = anchor_x
+                    x2_new = anchor_x + new_width
+                else:  # Left side dragging
+                    x2_new = anchor_x
+                    x1_new = anchor_x - new_width
+
+                if anchor_y == y1:  # Bottom side dragging
+                    y1_new = anchor_y
+                    y2_new = anchor_y + new_height
+                else:  # Top side dragging
+                    y2_new = anchor_y
+                    y1_new = anchor_y - new_height
+            elif 'n' in handle or 's' in handle:
                 new_height = abs(y2 - event.y) if 'n' in handle else abs(event.y - y1)
                 new_width = new_height * target_ratio
                 y1_new = max(y_off, min(event.y, y2 - m_size)) if 'n' in handle else y1
