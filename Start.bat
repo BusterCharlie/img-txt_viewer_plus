@@ -57,16 +57,22 @@ python -m pip install --upgrade pip
 
 REM Install requirements if requirements.txt exists
 if exist "requirements.txt" (
-    set /p INSTALL_REQ="requirements.txt found. Do you want to install the requirements? (Y/N): "
-    if /i "!INSTALL_REQ!"=="Y" (
-        echo Installing requirements...
-        pip install -r requirements.txt || (
-            echo Failed to install requirements.
-            pause
-            exit /b 1
-        )
+    if exist ".requirements_installed" (
+        echo Requirements were previously installed. Skipping prompt.
     ) else (
-        echo Skipping requirements installation.
+        set /p INSTALL_REQ="requirements.txt found. Do you want to install the requirements? (Y/N): "
+        if /i "!INSTALL_REQ!"=="Y" (
+            echo Installing requirements...
+            pip install -r requirements.txt || (
+                echo Failed to install requirements.
+                pause
+                exit /b 1
+            )
+            echo Creating marker file to skip future prompts.
+            echo Requirements installed on %date% %time% > .requirements_installed
+        ) else (
+            echo Skipping requirements installation.
+        )
     )
 )
 
