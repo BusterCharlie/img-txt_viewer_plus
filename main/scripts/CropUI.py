@@ -1733,80 +1733,181 @@ class CropInterface:
     def validate_aspect_ratios(self, ratios_string, standardize=False):
         """
         Validate a comma-separated list of aspect ratios
-        If standardize is True, convert all ratios to the standardized form (lowest integer ratio)
-        Invalid ratios are removed from the result
+        If standardize is True:
+          - Convert all ratios to lowest integer terms
+          - Sort by increasing rectangularity
+          - Add missing inverse pairs
         """
         if not ratios_string.strip():
             return False, "No aspect ratios provided.", ""
 
-        invalid_ratios = []
-        standardized_ratios = []
-        ratio_list = [r.strip() for r in ratios_string.split(',')]
+        # Parse and validate individual ratios
+        ratio_list = [r.strip() for r in ratios_string.split(',') if r.strip()]
+        valid_ratios, invalid_ratios = self._parse_and_validate_ratios(ratio_list, standardize)
+
+        if not valid_ratios:
+            return False, "No valid aspect ratios found. Please enter at least one valid ratio.", ""
+
+        # Format and organize the results
+        if standardize:
+            # Organize ratios by rectangularity and add inverse pairs
+            standardized_text = self._organize_ratios_by_rectangularity(valid_ratios)
+        else:
+            # Just join the ratios without special organization
+            standardized_text = ", ".join([r[1] for r in valid_ratios])
+
+        # Prepare warning message for invalid ratios
+        warning_message = self._format_invalid_ratios_message(invalid_ratios)
+
+        return True, warning_message, standardized_text
+
+    def _parse_and_validate_ratios(self, ratio_list, standardize):
+        """Validate each aspect ratio and convert to standard form if needed"""
+        valid_ratios = []     # Will store (numerical_value, formatted_text) pairs
+        invalid_ratios = []   # Will store invalid ratio entries with error messages
 
         # Define maximum allowed aspect ratio
         MAX_RATIO = 12.0
         MIN_RATIO = 1/12.0
 
         for ratio in ratio_list:
-            if not ratio:  # Skip empty entries
-                continue
-
-            # Check decimal format (e.g., "1.0")
+            # Decimal format (e.g., "1.0")
             if ':' not in ratio:
                 try:
                     value = float(ratio)
                     if value <= 0:
                         invalid_ratios.append(f"'{ratio}' (must be positive)")
-                    # Check if aspect ratio is within allowed range
                     elif value > MAX_RATIO:
                         invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 12:1)")
                     elif value < MIN_RATIO:
                         invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
                     else:
-                        # Convert decimal to ratio format if standardize is True
+                        # Convert to standardized form if requested
                         if standardize:
                             frac = fractions.Fraction(value).limit_denominator(1000)
                             standardized = f"{frac.numerator}:{frac.denominator}"
+                            valid_ratios.append((value, standardized))
                         else:
-                            standardized = ratio
-                        standardized_ratios.append(standardized)
+                            valid_ratios.append((value, ratio))
                 except ValueError:
                     invalid_ratios.append(f"'{ratio}' (not a valid number)")
-            # Check ratio format (e.g., "16:9")
+
+            # Ratio format (e.g., "16:9")
             else:
                 try:
                     width, height = ratio.split(':')
                     width_val = float(width.strip())
                     height_val = float(height.strip())
-                    ratio_value = width_val / height_val if height_val != 0 else float('inf')
 
                     if width_val <= 0 or height_val <= 0:
                         invalid_ratios.append(f"'{ratio}' (values must be positive)")
-                    # Check if aspect ratio is within allowed range
-                    elif ratio_value > MAX_RATIO:
-                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 12:1)")
-                    elif ratio_value < MIN_RATIO:
-                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
                     else:
-                        # Convert to standardized ratio format if standardize is True
-                        if standardize:
-                            # Create fraction from the calculated ratio, not from two separate values
-                            frac = fractions.Fraction(width_val / height_val).limit_denominator(1000)
-                            standardized = f"{frac.numerator}:{frac.denominator}"
+                        ratio_value = width_val / height_val
+
+                        if ratio_value > MAX_RATIO:
+                            invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 12:1)")
+                        elif ratio_value < MIN_RATIO:
+                            invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
                         else:
-                            standardized = ratio
-                        standardized_ratios.append(standardized)
+                            if standardize:
+                                frac = fractions.Fraction(ratio_value).limit_denominator(1000)
+                                standardized = f"{frac.numerator}:{frac.denominator}"
+                                valid_ratios.append((ratio_value, standardized))
+                            else:
+                                valid_ratios.append((ratio_value, ratio))
                 except ValueError:
                     invalid_ratios.append(f"'{ratio}' (not in 'W:H' format)")
 
-        if not standardized_ratios:
-            return False, "No valid aspect ratios found. Please enter at least one valid ratio.", ""
+        return valid_ratios, invalid_ratios
 
-        warning_message = ""
-        if invalid_ratios:
-            warning_message = f"The following aspect ratios were removed because they are invalid:\n{', '.join(invalid_ratios)}"
+    def _organize_ratios_by_rectangularity(self, valid_ratios):
+        """
+        Organize ratios by rectangularity (deviation from square)
+        Add inverse pairs where missing
+        """
+        # Group ratios by their deviation from square (1:1)
+        deviations = {}
+        ratio_texts = {}
 
-        return True, warning_message, ", ".join(standardized_ratios)
+        for value, text in valid_ratios:
+            # Ensure value is >= 1.0 for consistent deviation calculation
+            calc_value = max(value, 1.0/value)
+            deviation = abs(calc_value - 1.0)
+
+            if deviation not in deviations:
+                deviations[deviation] = []
+
+            # Store both the value and text
+            deviations[deviation].append((value, text))
+            ratio_texts[text] = value
+
+        # Process each deviation group
+        final_ratios = []
+
+        # Handle square ratio (1:1) specially
+        if 0 in deviations:  # This would be the 1:1 ratio
+            for _, text in deviations[0]:
+                final_ratios.append(text)
+
+        # Process each non-square deviation group
+        for deviation in sorted(deviations.keys()):
+            if deviation == 0:
+                continue  # Already handled square ratio
+
+            # Process pairs within this deviation group
+            pairs_processed = set()
+
+            for value, text in deviations[deviation]:
+                if text in pairs_processed:
+                    continue
+
+                # Add this ratio and find/create its inverse pair
+                inverse_value = 1.0 / value
+                inverse_found = False
+
+                for other_value, other_text in deviations[deviation]:
+                    # Check if this is the inverse pair
+                    if abs(other_value - inverse_value) < 0.0001 and other_text != text:
+                        # We found the inverse pair
+                        inverse_found = True
+                        pairs_processed.add(other_text)
+                        # Add in correct order (landscape first, then portrait)
+                        if value >= 1.0:  # This is landscape
+                            final_ratios.append(text)
+                            final_ratios.append(other_text)
+                        else:  # This is portrait, other is landscape
+                            final_ratios.append(other_text)
+                            final_ratios.append(text)
+                        break
+
+                if not inverse_found:
+                    # Create the inverse pair
+                    pairs_processed.add(text)
+
+                    # Split the ratio text to create the inverse ratio
+                    if ':' in text:
+                        num, denom = text.split(':')
+                        inverse_text = f"{denom}:{num}"
+                    else:
+                        # This shouldn't happen but handle it just in case
+                        frac = fractions.Fraction(1.0 / float(text)).limit_denominator(1000)
+                        inverse_text = f"{frac.numerator}:{frac.denominator}"
+
+                    # Add in landscape, portrait order
+                    if value >= 1.0:  # This is landscape
+                        final_ratios.append(text)
+                        final_ratios.append(inverse_text)
+                    else:  # This is portrait
+                        final_ratios.append(inverse_text)
+                        final_ratios.append(text)
+
+        return ", ".join(final_ratios)
+
+    def _format_invalid_ratios_message(self, invalid_ratios):
+        """Format the message for invalid ratios"""
+        if not invalid_ratios:
+            return ""
+        return f"The following aspect ratios were removed because they are invalid:\n{', '.join(invalid_ratios)}"
 
     def image_index_changed(self, event=None):
         try:
