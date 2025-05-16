@@ -1355,17 +1355,17 @@ class CropInterface:
         preset_frame = tk.Frame(fixed_selection_frame)
         preset_frame.grid(row=2, column=0, columnspan=99, sticky="ew", padx=self.pady, pady=(0, self.pady))
 
-        preset_label = ttk.Label(preset_frame, text="Presets:")
-        preset_label.pack(side="left")
-
-        standard_button = ttk.Button(preset_frame, text="Standard",
-                                   command=lambda: self.auto_entry_var.set(self.standard_ratios))
-        standard_button.pack(side="left", padx=2)
-
-        onetrainer_button = ttk.Button(preset_frame, text="Onetrainer",
-                                     command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
-        onetrainer_button.pack(side="left", padx=2)
-
+        self.preset_label = ttk.Label(preset_frame, text="Presets:")  # Store as instance variable
+        self.preset_label.pack(side="left")
+        ToolTip(self.preset_label, "Select a preset aspect ratio", 200, 6, 12)
+        self.standard_button = ttk.Button(preset_frame, text="Standard",  # Store as instance variable
+                                    command=lambda: self.auto_entry_var.set(self.standard_ratios))
+        self.standard_button.pack(side="left", padx=2)
+        ToolTip(self.standard_button, "Select standard aspect ratios", 200, 6, 12)
+        self.onetrainer_button = ttk.Button(preset_frame, text="Onetrainer",  # Store as instance variable
+                                    command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
+        self.onetrainer_button.pack(side="left", padx=2)
+        ToolTip(self.onetrainer_button, "Select onetrainer bucket aspect ratios", 200, 6, 12)
         self.auto_aspect_checkbutton = ttk.Checkbutton(fixed_selection_frame, text="Auto", variable=self.auto_aspect_var, command=self.update_auto_entry_state, state="disabled")
         self.auto_aspect_checkbutton.grid(row=1, column=0, padx=self.padxl, pady=self.pady, sticky="w")
         ToolTip(self.auto_aspect_checkbutton, "Automatically select the best aspect ratio for the selection based on the predefined ratios and the aspect ratio of the displayed image.\n\n'Fixed' and 'Aspect Ratio' must be enabled!", 200, 6, 12, wraplength=240)
@@ -1569,12 +1569,24 @@ class CropInterface:
             if self.auto_aspect_var.get():
                 self.auto_entry.config(state="normal")
                 self.fixed_selection_entry.config(state="disabled")
+                # Enable presets
+                self.preset_label.config(state="normal")
+                self.standard_button.config(state="normal")
+                self.onetrainer_button.config(state="normal")
             else:
                 self.auto_entry.config(state="disabled")
                 self.fixed_selection_entry.config(state="normal")
+                # Disable presets
+                self.preset_label.config(state="disabled")
+                self.standard_button.config(state="disabled")
+                self.onetrainer_button.config(state="disabled")
         else:
             self.auto_entry.config(state="disabled")
             self.fixed_selection_entry.config(state="normal")
+            # Disable presets
+            self.preset_label.config(state="disabled")
+            self.standard_button.config(state="disabled")
+            self.onetrainer_button.config(state="disabled")
 
 
     def determine_best_aspect_ratio(self, event=None):
