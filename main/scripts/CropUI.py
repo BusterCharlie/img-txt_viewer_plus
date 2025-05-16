@@ -1653,9 +1653,50 @@ class CropInterface:
                 # Show save button to allow updating
                 self.save_preset_button.config(state="normal")  # Show button
 
+    def validate_aspect_ratios(self, ratios_string):
+        """Validate a comma-separated list of aspect ratios"""
+        if not ratios_string.strip():
+            return False, "No aspect ratios provided."
+
+        invalid_ratios = []
+        ratio_list = [r.strip() for r in ratios_string.split(',')]
+
+        for ratio in ratio_list:
+            if not ratio:  # Skip empty entries
+                continue
+
+            # Check decimal format (e.g., "1.0")
+            if ':' not in ratio:
+                try:
+                    value = float(ratio)
+                    if value <= 0:
+                        invalid_ratios.append(f"'{ratio}' (must be positive)")
+                except ValueError:
+                    invalid_ratios.append(f"'{ratio}' (not a valid number)")
+            # Check ratio format (e.g., "16:9")
+            else:
+                try:
+                    width, height = ratio.split(':')
+                    width_val = float(width.strip())
+                    height_val = float(height.strip())
+                    if width_val <= 0 or height_val <= 0:
+                        invalid_ratios.append(f"'{ratio}' (values must be positive)")
+                except ValueError:
+                    invalid_ratios.append(f"'{ratio}' (not in 'W:H' format)")
+
+        if invalid_ratios:
+            return False, f"The following aspect ratios are invalid:\n{', '.join(invalid_ratios)}\n\nValid formats are: '1.0' or 'W:H'"
+        return True, ""
+
     def save_current_as_custom(self):
         current_ratios = self.auto_entry_var.get()
         if current_ratios:
+            # Validate the aspect ratios before saving
+            is_valid, error_message = self.validate_aspect_ratios(current_ratios)
+            if not is_valid:
+                messagebox.showerror("Invalid Aspect Ratios", error_message)
+                return
+
             self.custom_ratios.set(current_ratios)
 
             # Save to settings
@@ -1667,8 +1708,8 @@ class CropInterface:
                 self.parent.settings_manager.write_settings_to_file()
 
             messagebox.showinfo("Custom Preset", "Current aspect ratios saved as custom preset.")
-            # Show save button for future updates
-            self.save_preset_button.pack(side="left", padx=2)
+            # Enable save button for future updates
+            self.save_preset_button.config(state="normal")
         else:
             messagebox.showinfo("Custom Preset", "No aspect ratios to save. Enter some ratios first.")
             self.preset_combobox.current(0)  # Reset to Standard
