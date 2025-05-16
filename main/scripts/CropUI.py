@@ -1761,6 +1761,23 @@ class CropInterface:
 
         return True, warning_message, standardized_text
 
+    def _limit_large_integers(self, value, max_integer=64):
+        """
+        Approximate a fraction to ensure both numerator and denominator are <= max_integer
+        while maintaining the closest possible ratio.
+        """
+        frac = fractions.Fraction(value).limit_denominator(1000)
+
+        # Check if either part exceeds the max value
+        if frac.numerator > max_integer or frac.denominator > max_integer:
+            # Start with a high limit and gradually reduce it
+            for limit in [1000, 500, 200, 100, 64, 32, 16, 8, 4]:
+                temp_frac = fractions.Fraction(value).limit_denominator(limit)
+                if temp_frac.numerator <= max_integer and temp_frac.denominator <= max_integer:
+                    return temp_frac
+
+        return frac
+
     def _parse_and_validate_ratios(self, ratio_list, standardize):
         """Validate each aspect ratio and convert to standard form if needed"""
         valid_ratios = []     # Will store (numerical_value, formatted_text) pairs
@@ -1769,6 +1786,7 @@ class CropInterface:
         # Define maximum allowed aspect ratio
         MAX_RATIO = 12.0
         MIN_RATIO = 1/12.0
+        MAX_INTEGER = 64  # Maximum value for ratio components
 
         for ratio in ratio_list:
             # Decimal format (e.g., "1.0")
@@ -1784,7 +1802,7 @@ class CropInterface:
                     else:
                         # Convert to standardized form if requested
                         if standardize:
-                            frac = fractions.Fraction(value).limit_denominator(1000)
+                            frac = self._limit_large_integers(value, MAX_INTEGER)
                             standardized = f"{frac.numerator}:{frac.denominator}"
                             valid_ratios.append((value, standardized))
                         else:
@@ -1810,8 +1828,18 @@ class CropInterface:
                             invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
                         else:
                             if standardize:
-                                frac = fractions.Fraction(ratio_value).limit_denominator(1000)
-                                standardized = f"{frac.numerator}:{frac.denominator}"
+                                # Check if width or height exceed MAX_INTEGER
+                                if width_val > MAX_INTEGER or height_val > MAX_INTEGER:
+                                    frac = self._limit_large_integers(ratio_value, MAX_INTEGER)
+                                    standardized = f"{frac.numerator}:{frac.denominator}"
+                                else:
+                                    # Keep original values if they're already small enough
+                                    if width_val.is_integer() and height_val.is_integer():
+                                        standardized = f"{int(width_val)}:{int(height_val)}"
+                                    else:
+                                        frac = self._limit_large_integers(ratio_value, MAX_INTEGER)
+                                        standardized = f"{frac.numerator}:{frac.denominator}"
+
                                 valid_ratios.append((ratio_value, standardized))
                             else:
                                 valid_ratios.append((ratio_value, ratio))
@@ -1823,83 +1851,104 @@ class CropInterface:
     def _organize_ratios_by_rectangularity(self, valid_ratios):
         """
         Organize ratios by rectangularity (deviation from square)
-        Add inverse pairs where missing
+        Add inverse pairs where missing and remove duplicates
         """
         # Group ratios by their deviation from square (1:1)
         deviations = {}
-        ratio_texts = {}
 
+        # Track numerical values that have been added to detect duplicates
+        added_values = set()
+
+        # First pass: Group by rectangularity and normalize values
         for value, text in valid_ratios:
-            # Ensure value is >= 1.0 for consistent deviation calculation
-            calc_value = max(value, 1.0/value)
-            deviation = abs(calc_value - 1.0)
+            # Ensure consistent representation (always use value ≥ 1.0)
+            normalized_value = max(value, 1.0/value)
+            deviation = abs(normalized_value - 1.0)
 
             if deviation not in deviations:
                 deviations[deviation] = []
 
-            # Store both the value and text
-            deviations[deviation].append((value, text))
-            ratio_texts[text] = value
+            # Store the normalized value and original value/text
+            deviations[deviation].append((normalized_value, value, text))
 
         # Process each deviation group
         final_ratios = []
 
-        # Handle square ratio (1:1) specially
-        if 0 in deviations:  # This would be the 1:1 ratio
-            for _, text in deviations[0]:
-                final_ratios.append(text)
+        # Handle square ratio (1:1) specially - should only appear once
+        if 0 in deviations:
+            for _, _, text in deviations[0]:
+                if "1:1" not in final_ratios:  # Ensure we only add 1:1 once
+                    final_ratios.append("1:1")
+                break
 
         # Process each non-square deviation group
         for deviation in sorted(deviations.keys()):
             if deviation == 0:
-                continue  # Already handled square ratio
+                continue  # Square ratio already handled
 
-            # Process pairs within this deviation group
-            pairs_processed = set()
+            # Track processed values in this group
+            processed_values = set()
 
-            for value, text in deviations[deviation]:
-                if text in pairs_processed:
+            # Sort by value for consistent ordering
+            sorted_ratios = sorted(deviations[deviation], key=lambda x: x[1], reverse=True)
+
+            for normalized_value, value, text in sorted_ratios:
+                # Skip if we've already processed this value (or its inverse)
+                if normalized_value in processed_values:
                     continue
 
-                # Add this ratio and find/create its inverse pair
+                # Mark as processed
+                processed_values.add(normalized_value)
+
+                # Get or create the numerical inverse
                 inverse_value = 1.0 / value
-                inverse_found = False
 
-                for other_value, other_text in deviations[deviation]:
-                    # Check if this is the inverse pair
-                    if abs(other_value - inverse_value) < 0.0001 and other_text != text:
-                        # We found the inverse pair
-                        inverse_found = True
-                        pairs_processed.add(other_text)
-                        # Add in correct order (landscape first, then portrait)
-                        if value >= 1.0:  # This is landscape
-                            final_ratios.append(text)
-                            final_ratios.append(other_text)
-                        else:  # This is portrait, other is landscape
-                            final_ratios.append(other_text)
-                            final_ratios.append(text)
-                        break
+                # Create both landscape and portrait ratios
+                if value >= 1.0:  # This is landscape
+                    landscape_text = text
+                    portrait_text = None
 
-                if not inverse_found:
-                    # Create the inverse pair
-                    pairs_processed.add(text)
+                    # Find matching portrait ratio if it exists
+                    for _, other_val, other_text in sorted_ratios:
+                        if abs(other_val - inverse_value) < 0.0001:
+                            portrait_text = other_text
+                            break
 
-                    # Split the ratio text to create the inverse ratio
-                    if ':' in text:
-                        num, denom = text.split(':')
-                        inverse_text = f"{denom}:{num}"
-                    else:
-                        # This shouldn't happen but handle it just in case
-                        frac = fractions.Fraction(1.0 / float(text)).limit_denominator(1000)
-                        inverse_text = f"{frac.numerator}:{frac.denominator}"
+                    # Create portrait text if not found
+                    if portrait_text is None:
+                        if ':' in text:
+                            width, height = text.split(':')
+                            portrait_text = f"{height}:{width}"
+                        else:
+                            # For decimal format
+                            frac = fractions.Fraction(inverse_value).limit_denominator(1000)
+                            portrait_text = f"{frac.numerator}:{frac.denominator}"
+                else:  # This is portrait
+                    portrait_text = text
+                    landscape_text = None
 
-                    # Add in landscape, portrait order
-                    if value >= 1.0:  # This is landscape
-                        final_ratios.append(text)
-                        final_ratios.append(inverse_text)
-                    else:  # This is portrait
-                        final_ratios.append(inverse_text)
-                        final_ratios.append(text)
+                    # Find matching landscape ratio if it exists
+                    for _, other_val, other_text in sorted_ratios:
+                        if abs(other_val - inverse_value) < 0.0001:
+                            landscape_text = other_text
+                            break
+
+                    # Create landscape text if not found
+                    if landscape_text is None:
+                        if ':' in text:
+                            width, height = text.split(':')
+                            landscape_text = f"{height}:{width}"
+                        else:
+                            # For decimal format
+                            frac = fractions.Fraction(inverse_value).limit_denominator(1000)
+                            landscape_text = f"{frac.numerator}:{frac.denominator}"
+
+                # Add the pair in landscape-portrait order
+                # Only add if not already in our final ratios
+                if landscape_text not in final_ratios:
+                    final_ratios.append(landscape_text)
+                if portrait_text not in final_ratios:
+                    final_ratios.append(portrait_text)
 
         return ", ".join(final_ratios)
 
