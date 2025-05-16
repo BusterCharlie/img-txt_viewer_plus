@@ -1134,6 +1134,7 @@ class CropInterface:
         # Aspect ratio presets
         self.standard_ratios = "1:1, 5:4, 4:5, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16, 2:1, 1:2"
         self.onetrainer_ratios = "1:1, 4:5, 5:4, 2:3, 3:2, 4:7, 7:4, 1:2, 2:1, 2:5, 5:2, 1:3, 3:1, 2:7, 7:2, 1:4, 4:1"
+        self.custom_ratios = tk.StringVar(value="")
         self.auto_entry_var = tk.StringVar(value=self.standard_ratios)
 
 
@@ -1149,6 +1150,13 @@ class CropInterface:
         self.image_files = image_paths
         self.version = self.parent.app_version
         self.text_controller = self.parent.text_controller
+
+        # Load custom ratios from settings if available
+        if hasattr(parent, 'settings_manager'):
+            config = parent.settings_manager.config
+            if config.has_section("Crop"):
+                self.custom_ratios.set(config.get("Crop", "custom_ratios", fallback=""))
+
         # Window
         self.root.minsize(530, 370)
         self.root.title(f"{self.version} - img-txt Viewer - Crop Image")
@@ -1355,20 +1363,33 @@ class CropInterface:
         preset_frame = tk.Frame(fixed_selection_frame)
         preset_frame.grid(row=2, column=0, columnspan=99, sticky="ew", padx=self.pady, pady=(0, self.pady))
 
-        self.preset_label = ttk.Label(preset_frame, text="Presets:")  # Store as instance variable
-        self.preset_label.pack(side="left")
+        # Use grid layout for consistent positioning
+        preset_frame.columnconfigure(0, weight=0)  # Label column
+        preset_frame.columnconfigure(1, weight=1)  # Dropdown column
+        preset_frame.columnconfigure(2, weight=0)  # Save button column
+
+        self.preset_label = ttk.Label(preset_frame, text="Presets:")
+        self.preset_label.grid(row=0, column=0, sticky="w")
         ToolTip(self.preset_label, "Select a preset aspect ratio", 200, 6, 12)
-        self.standard_button = ttk.Button(preset_frame, text="Standard",  # Store as instance variable
-                                command=lambda: self.auto_entry_var.set(self.standard_ratios))
-        self.standard_button.pack(side="left", padx=2)
-        ToolTip(self.standard_button, "Select standard aspect ratios", 200, 6, 12)
-        self.onetrainer_button = ttk.Button(preset_frame, text="Onetrainer",  # Store as instance variable
-                                command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
-        self.onetrainer_button.pack(side="left", padx=2)
-        ToolTip(self.onetrainer_button, "Select onetrainer bucket aspect ratios", 200, 6, 12)
+
+        # Replace buttons with dropdown
+        self.preset_combobox = ttk.Combobox(preset_frame, values=["Standard", "Onetrainer", "Custom"],
+                                            state="readonly", width=12)
+        self.preset_combobox.grid(row=0, column=1, sticky="ew", padx=2)
+        self.preset_combobox.current(0)  # Default to Standard
+        self.preset_combobox.bind("<<ComboboxSelected>>", self.handle_preset_selection)
+        ToolTip(self.preset_combobox, "Select preset aspect ratios or save your own custom preset", 200, 6, 12)
+
+        # Save button (always in layout)
+        self.save_preset_button = ttk.Button(preset_frame, text="Save", width=5,
+                                            command=self.save_current_as_custom)
+        self.save_preset_button.grid(row=0, column=2, padx=2)
+        self.save_preset_button.config(state="disabled")  # Initially disabled instead of hidden
+        ToolTip(self.save_preset_button, "Save current ratios as custom preset", 200, 6, 12)
+
         self.auto_aspect_checkbutton = ttk.Checkbutton(fixed_selection_frame, text="Auto", variable=self.auto_aspect_var, command=self.update_auto_entry_state, state="disabled")
-        self.auto_aspect_checkbutton.grid(row=1, column=0, padx=self.padxl, pady=self.pady, sticky="w")
-        ToolTip(self.auto_aspect_checkbutton, "Automatically select the best aspect ratio for the selection based on the predefined ratios and the aspect ratio of the displayed image.\n\n'Fixed' and 'Aspect Ratio' must be enabled!", 200, 6, 12, wraplength=240)
+        self.auto_aspect_checkbutton.grid(row=1, column=0, padx=self.padxl, pady=self.pady, sticky="w")  # ADD THIS LINE
+
         # Error Pip
         self.selection_error_pip = tk.Label(fixed_selection_frame)
         self.selection_error_pip.grid(row=1, column=1, pady=self.pady, sticky="w")
@@ -1388,6 +1409,7 @@ class CropInterface:
         self.auto_entry.grid(row=3, column=0, columnspan=99, sticky="ew", padx=self.pady, pady=self.pady)
         self.text_controller.bind_entry_functions(self.auto_entry)
         ToolTip(self.auto_entry, "Enter aspect ratios separated by commas. As a ratio: 'W:H', or a decimal: '1.0'", 200, 6, 12)
+
         # Call this to properly set the initial states of the preset buttons
         self.update_auto_entry_state()
 
@@ -1431,6 +1453,7 @@ class CropInterface:
 # --------------------------------------
 # UI Helpers
 # --------------------------------------
+
     def update_widget_values(self, label=False, resize=False):
         def update_label(aspect_ratio):
             width = int(self.width_spinbox.get())
@@ -1570,24 +1593,27 @@ class CropInterface:
             if self.auto_aspect_var.get():
                 self.auto_entry.config(state="normal")
                 self.fixed_selection_entry.config(state="disabled")
-                # Enable presets
+                # Enable preset dropdown
                 self.preset_label.config(state="normal")
-                self.standard_button.config(state="normal")
-                self.onetrainer_button.config(state="normal")
+                self.preset_combobox.config(state="readonly")
+                if self.preset_combobox.get() == "Custom" and self.custom_ratios.get():
+                    self.save_preset_button.config(state="normal")  # Show button
+                else:
+                    self.save_preset_button.config(state="disabled")  # Hide button
             else:
                 self.auto_entry.config(state="disabled")
                 self.fixed_selection_entry.config(state="normal")
-                # Disable presets
+                # Disable preset dropdown
                 self.preset_label.config(state="disabled")
-                self.standard_button.config(state="disabled")
-                self.onetrainer_button.config(state="disabled")
+                self.preset_combobox.config(state="disabled")
+                self.save_preset_button.config(state="disabled")  # Hide button
         else:
             self.auto_entry.config(state="disabled")
             self.fixed_selection_entry.config(state="normal")
-            # Disable presets
+            # Disable preset dropdown
             self.preset_label.config(state="disabled")
-            self.standard_button.config(state="disabled")
-            self.onetrainer_button.config(state="disabled")
+            self.preset_combobox.config(state="disabled")
+            self.save_preset_button.config(state="disabled")  # Hide button
 
 
     def determine_best_aspect_ratio(self, event=None):
@@ -1608,6 +1634,44 @@ class CropInterface:
         self.fixed_selection_entry.insert(0, str(closest_ratio))
         self.fixed_selection_entry.config(state="disabled")
 
+    def handle_preset_selection(self, event=None):
+        selection = self.preset_combobox.get()
+
+        if selection == "Standard":
+            self.auto_entry_var.set(self.standard_ratios)
+            self.save_preset_button.config(state="disabled")  # Hide button
+        elif selection == "Onetrainer":
+            self.auto_entry_var.set(self.onetrainer_ratios)
+            self.save_preset_button.config(state="disabled")  # Hide button
+        elif selection == "Custom":
+            if not self.custom_ratios.get():
+                # First time selecting Custom - save current ratios
+                self.save_current_as_custom()
+            else:
+                # Load saved custom ratios
+                self.auto_entry_var.set(self.custom_ratios.get())
+                # Show save button to allow updating
+                self.save_preset_button.config(state="normal")  # Show button
+
+    def save_current_as_custom(self):
+        current_ratios = self.auto_entry_var.get()
+        if current_ratios:
+            self.custom_ratios.set(current_ratios)
+
+            # Save to settings
+            if hasattr(self.parent, 'settings_manager'):
+                config = self.parent.settings_manager.config
+                if not config.has_section("Crop"):
+                    config.add_section("Crop")
+                config.set("Crop", "custom_ratios", current_ratios)
+                self.parent.settings_manager.write_settings_to_file()
+
+            messagebox.showinfo("Custom Preset", "Current aspect ratios saved as custom preset.")
+            # Show save button for future updates
+            self.save_preset_button.pack(side="left", padx=2)
+        else:
+            messagebox.showinfo("Custom Preset", "No aspect ratios to save. Enter some ratios first.")
+            self.preset_combobox.current(0)  # Reset to Standard
 
     def image_index_changed(self, event=None):
         try:
