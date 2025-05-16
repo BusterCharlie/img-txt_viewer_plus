@@ -18,7 +18,7 @@ Create a UI that allows the user to open an image file and crop a selection from
 
 # Standard Library
 import os
-
+import fractions
 
 # Standard Library GUI
 import tkinter as tk
@@ -1155,7 +1155,18 @@ class CropInterface:
         if hasattr(parent, 'settings_manager'):
             config = parent.settings_manager.config
             if config.has_section("Crop"):
-                self.custom_ratios.set(config.get("Crop", "custom_ratios", fallback=""))
+                custom_ratios = config.get("Crop", "custom_ratios", fallback="")
+                if custom_ratios:
+                    # Validate and standardize the loaded custom ratios
+                    is_valid, _, standardized_ratios = self.validate_aspect_ratios(custom_ratios, standardize=True)
+                    if is_valid:
+                        self.custom_ratios.set(standardized_ratios)
+                        # Update the settings if they changed during standardization
+                        if standardized_ratios != custom_ratios:
+                            config.set("Crop", "custom_ratios", standardized_ratios)
+                            parent.settings_manager.write_settings_to_file()
+                    else:
+                        self.custom_ratios.set("1:1")  # Use default if invalid
 
         # Window
         self.root.minsize(530, 370)
@@ -1638,28 +1649,103 @@ class CropInterface:
         selection = self.preset_combobox.get()
 
         if selection == "Standard":
-            self.auto_entry_var.set(self.standard_ratios)
-            self.save_preset_button.config(state="disabled")  # Hide button
+            # Standardize the standard ratios for consistency
+            is_valid, _, standardized_ratios = self.validate_aspect_ratios(self.standard_ratios, standardize=True)
+            if is_valid:
+                self.auto_entry_var.set(standardized_ratios)
+            else:
+                self.auto_entry_var.set(self.standard_ratios)
+            self.save_preset_button.config(state="disabled")
+
         elif selection == "Onetrainer":
-            self.auto_entry_var.set(self.onetrainer_ratios)
-            self.save_preset_button.config(state="disabled")  # Hide button
+            # Standardize the onetrainer ratios for consistency
+            is_valid, _, standardized_ratios = self.validate_aspect_ratios(self.onetrainer_ratios, standardize=True)
+            if is_valid:
+                self.auto_entry_var.set(standardized_ratios)
+            else:
+                self.auto_entry_var.set(self.onetrainer_ratios)
+            self.save_preset_button.config(state="disabled")
+
         elif selection == "Custom":
             if not self.custom_ratios.get():
                 # First time selecting Custom - save current ratios
                 self.save_current_as_custom()
             else:
-                # Load saved custom ratios
-                self.auto_entry_var.set(self.custom_ratios.get())
-                # Show save button to allow updating
-                self.save_preset_button.config(state="normal")  # Show button
+                # Load saved custom ratios (and validate again to ensure consistency)
+                is_valid, message, standardized_ratios = self.validate_aspect_ratios(
+                    self.custom_ratios.get(), standardize=True
+                )
 
-    def validate_aspect_ratios(self, ratios_string):
-        """Validate a comma-separated list of aspect ratios"""
+                if is_valid:
+                    self.auto_entry_var.set(standardized_ratios)
+                    # Update the stored custom ratios if they changed during standardization
+                    if standardized_ratios != self.custom_ratios.get():
+                        self.custom_ratios.set(standardized_ratios)
+                        # Update settings file if needed
+                        if hasattr(self.parent, 'settings_manager'):
+                            config = self.parent.settings_manager.config
+                            if not config.has_section("Crop"):
+                                config.add_section("Crop")
+                            config.set("Crop", "custom_ratios", standardized_ratios)
+                            self.parent.settings_manager.write_settings_to_file()
+                else:
+                    # If validation fails, show warning and use original values
+                    messagebox.showwarning("Invalid Custom Ratios",
+                                          "Some custom ratios were invalid and will be removed.")
+                    self.auto_entry_var.set(standardized_ratios if standardized_ratios else "1:1")
+
+                # Show save button to allow updating
+                self.save_preset_button.config(state="normal")
+
+    def save_current_as_custom(self):
+        current_ratios = self.auto_entry_var.get()
+        if current_ratios:
+            # Validate and standardize the aspect ratios before saving
+            is_valid, message, standardized_ratios = self.validate_aspect_ratios(current_ratios, standardize=True)
+            if not is_valid:
+                messagebox.showerror("Invalid Aspect Ratios", message)
+                return
+
+            # Use standardized ratios
+            self.custom_ratios.set(standardized_ratios)
+            self.auto_entry_var.set(standardized_ratios)  # Update the UI with standardized values
+
+            # Save to settings
+            if hasattr(self.parent, 'settings_manager'):
+                config = self.parent.settings_manager.config
+                if not config.has_section("Crop"):
+                    config.add_section("Crop")
+                config.set("Crop", "custom_ratios", standardized_ratios)
+                self.parent.settings_manager.write_settings_to_file()
+
+            # Show warning if some ratios were removed
+            if message:
+                messagebox.showwarning("Some Ratios Removed", message)
+            else:
+                messagebox.showinfo("Custom Preset", "Current aspect ratios saved as custom preset.")
+
+            # Enable save button for future updates
+            self.save_preset_button.config(state="normal")
+        else:
+            messagebox.showinfo("Custom Preset", "No aspect ratios to save. Enter some ratios first.")
+            self.preset_combobox.current(0)  # Reset to Standard
+
+    def validate_aspect_ratios(self, ratios_string, standardize=False):
+        """
+        Validate a comma-separated list of aspect ratios
+        If standardize is True, convert all ratios to the standardized form (lowest integer ratio)
+        Invalid ratios are removed from the result
+        """
         if not ratios_string.strip():
-            return False, "No aspect ratios provided."
+            return False, "No aspect ratios provided.", ""
 
         invalid_ratios = []
+        standardized_ratios = []
         ratio_list = [r.strip() for r in ratios_string.split(',')]
+
+        # Define maximum allowed aspect ratio
+        MAX_RATIO = 12.0
+        MIN_RATIO = 1/12.0
 
         for ratio in ratio_list:
             if not ratio:  # Skip empty entries
@@ -1671,6 +1757,19 @@ class CropInterface:
                     value = float(ratio)
                     if value <= 0:
                         invalid_ratios.append(f"'{ratio}' (must be positive)")
+                    # Check if aspect ratio is within allowed range
+                    elif value > MAX_RATIO:
+                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 12:1)")
+                    elif value < MIN_RATIO:
+                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
+                    else:
+                        # Convert decimal to ratio format if standardize is True
+                        if standardize:
+                            frac = fractions.Fraction(value).limit_denominator(1000)
+                            standardized = f"{frac.numerator}:{frac.denominator}"
+                        else:
+                            standardized = ratio
+                        standardized_ratios.append(standardized)
                 except ValueError:
                     invalid_ratios.append(f"'{ratio}' (not a valid number)")
             # Check ratio format (e.g., "16:9")
@@ -1679,40 +1778,35 @@ class CropInterface:
                     width, height = ratio.split(':')
                     width_val = float(width.strip())
                     height_val = float(height.strip())
+                    ratio_value = width_val / height_val if height_val != 0 else float('inf')
+
                     if width_val <= 0 or height_val <= 0:
                         invalid_ratios.append(f"'{ratio}' (values must be positive)")
+                    # Check if aspect ratio is within allowed range
+                    elif ratio_value > MAX_RATIO:
+                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 12:1)")
+                    elif ratio_value < MIN_RATIO:
+                        invalid_ratios.append(f"'{ratio}' (aspect ratio cannot exceed 1:12)")
+                    else:
+                        # Convert to standardized ratio format if standardize is True
+                        if standardize:
+                            # Create fraction from the calculated ratio, not from two separate values
+                            frac = fractions.Fraction(width_val / height_val).limit_denominator(1000)
+                            standardized = f"{frac.numerator}:{frac.denominator}"
+                        else:
+                            standardized = ratio
+                        standardized_ratios.append(standardized)
                 except ValueError:
                     invalid_ratios.append(f"'{ratio}' (not in 'W:H' format)")
 
+        if not standardized_ratios:
+            return False, "No valid aspect ratios found. Please enter at least one valid ratio.", ""
+
+        warning_message = ""
         if invalid_ratios:
-            return False, f"The following aspect ratios are invalid:\n{', '.join(invalid_ratios)}\n\nValid formats are: '1.0' or 'W:H'"
-        return True, ""
+            warning_message = f"The following aspect ratios were removed because they are invalid:\n{', '.join(invalid_ratios)}"
 
-    def save_current_as_custom(self):
-        current_ratios = self.auto_entry_var.get()
-        if current_ratios:
-            # Validate the aspect ratios before saving
-            is_valid, error_message = self.validate_aspect_ratios(current_ratios)
-            if not is_valid:
-                messagebox.showerror("Invalid Aspect Ratios", error_message)
-                return
-
-            self.custom_ratios.set(current_ratios)
-
-            # Save to settings
-            if hasattr(self.parent, 'settings_manager'):
-                config = self.parent.settings_manager.config
-                if not config.has_section("Crop"):
-                    config.add_section("Crop")
-                config.set("Crop", "custom_ratios", current_ratios)
-                self.parent.settings_manager.write_settings_to_file()
-
-            messagebox.showinfo("Custom Preset", "Current aspect ratios saved as custom preset.")
-            # Enable save button for future updates
-            self.save_preset_button.config(state="normal")
-        else:
-            messagebox.showinfo("Custom Preset", "No aspect ratios to save. Enter some ratios first.")
-            self.preset_combobox.current(0)  # Reset to Standard
+        return True, warning_message, ", ".join(standardized_ratios)
 
     def image_index_changed(self, event=None):
         try:
