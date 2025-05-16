@@ -36,3 +36,4 @@ onnx_models/*
 docs/Workpad.md
 
 .requirements_installed
+mypy.ini

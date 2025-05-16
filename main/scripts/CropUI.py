@@ -1359,11 +1359,11 @@ class CropInterface:
         self.preset_label.pack(side="left")
         ToolTip(self.preset_label, "Select a preset aspect ratio", 200, 6, 12)
         self.standard_button = ttk.Button(preset_frame, text="Standard",  # Store as instance variable
-                                    command=lambda: self.auto_entry_var.set(self.standard_ratios))
+                                command=lambda: self.auto_entry_var.set(self.standard_ratios))
         self.standard_button.pack(side="left", padx=2)
         ToolTip(self.standard_button, "Select standard aspect ratios", 200, 6, 12)
         self.onetrainer_button = ttk.Button(preset_frame, text="Onetrainer",  # Store as instance variable
-                                    command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
+                                command=lambda: self.auto_entry_var.set(self.onetrainer_ratios))
         self.onetrainer_button.pack(side="left", padx=2)
         ToolTip(self.onetrainer_button, "Select onetrainer bucket aspect ratios", 200, 6, 12)
         self.auto_aspect_checkbutton = ttk.Checkbutton(fixed_selection_frame, text="Auto", variable=self.auto_aspect_var, command=self.update_auto_entry_state, state="disabled")
@@ -1388,7 +1388,8 @@ class CropInterface:
         self.auto_entry.grid(row=3, column=0, columnspan=99, sticky="ew", padx=self.pady, pady=self.pady)
         self.text_controller.bind_entry_functions(self.auto_entry)
         ToolTip(self.auto_entry, "Enter aspect ratios separated by commas. As a ratio: 'W:H', or a decimal: '1.0'", 200, 6, 12)
-
+        # Call this to properly set the initial states of the preset buttons
+        self.update_auto_entry_state()
 
     def create_option_widgets(self):
         options_frame = ttk.LabelFrame(self.control_panel, text="Options")
